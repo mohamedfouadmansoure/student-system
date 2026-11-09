@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <title>لوحة المالك</title>
+  <style>
+    body{font-family:Tahoma;background:#f0f2f5;padding:20px;max-width:800px;margin:auto}
+    .card{background:#fff;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+    button{background:#0a7c42;color:#fff;padding:12px 24px;border:none;border-radius:6px;cursor:pointer;font-size:15px;margin:6px}
+    button.danger{background:#b00}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .warn{background:#fff3cd;border-left:4px solid #f0ad4e;padding:12px;border-radius:6px;margin:12px 0}
+    .ok{background:#d4edda;padding:12px;border-radius:6px;margin:12px 0}
+    .err{background:#f8d7da;padding:12px;border-radius:6px;margin:12px 0}
+    .stat{display:inline-block;background:#e9ecef;padding:8px 14px;border-radius:20px;margin:4px}
+    a{color:#0a7c42}
+  </style>
+</head>
+<body>
+<div id="login" class="card">
+  <h2>🔐 لوحة المالك</h2>
+  <p>سجّل الدخول بحساب Google الخاص بالمالك فقط.</p>
+  <button onclick="login()">تسجيل الدخول بـ Google</button>
+  <div id="loginMsg"></div>
+</div>
+
+<div id="panel" class="card" style="display:none">
+  <h2>📊 لوحة التحكم</h2>
+  <div id="stats"></div>
+  <div class="warn">
+    ⚠️ <b>تذكير مهم:</b> يجب عليك تنزيل الأرشيف على جهازك سنويًا قبل بدء سنة جديدة، لتجنب امتلاء مساحة Google Drive. <a id="archiveLink" target="_blank">افتح مجلد الأرشيف</a>
+  </div>
+  <hr>
+  <h3>1️⃣ بدء سنة جديدة</h3>
+  <p>سيتم أرشفة كل الملفات الحالية (الشيت، الصور، البيانات) وإنشاء مجلد Inbox لرفع ملف الإكسيل الجديد.</p>
+  <button class="danger" onclick="confirmNewYear()">🚀 بدء سنة جديدة</button>
+  <div id="newYearMsg"></div>
+
+  <div id="processSection" style="display:none">
+    <hr>
+    <h3>2️⃣ معالجة ملف الإكسيل الجديد</h3>
+    <p>بعد رفع الملف في مجلد Inbox، اضغط الزر لاستيراده وبدء دورة الحياة الجديدة.</p>
+    <button onclick="processExcel()">📥 معالجة الملف واستيراد البيانات</button>
+    <div id="processMsg"></div>
+  </div>
+</div>
+
+<script>
+// ✏️ عدّل السطور الثلاثة دي من مفكرتك:
+const SUPABASE_URL = 'https://dlvqfwtfeyuzljyzclbu.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRsdnFmd3RmZXl1emxqeXpjbGJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQyMzQwMjksImV4cCI6MjEwOTgxMDAyOX0.uDy1dxBFLQpH39MhakAm1269soBdRsaptJMYB79kfMs';
+const APPS_URL = 'https://script.google.com/macros/s/AKfycbxXj--ts-l_qiUlWpToQQCbLU_7dGOTBv8EIg1uvUQsysgcH3mF5uMGYiSksoGTKp2HXQ/exec';
+
+let accessToken = null;
+
+(async () => {
+  const hash = new URLSearchParams(location.hash.substring(1));
+  if (hash.get('access_token')) {
+    accessToken = hash.get('access_token');
+    localStorage.setItem('sb_token', accessToken);
+    history.replaceState(null, '', location.pathname);
+  } else {
+    accessToken = localStorage.getItem('sb_token');
+  }
+  if (accessToken) {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { Authorization: 'Bearer ' + accessToken } });
+      if (r.ok) { showPanel(); loadStats(); } else { localStorage.removeItem('sb_token'); }
+    } catch {}
+  }
+})();
+
+function login() {
+  const redirect = location.origin + location.pathname;
+  location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirect)}`;
+}
+
+async function showPanel() {
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('panel').style.display = 'block';
+}
+
+async function loadStats() {
+  const r = await fetch(APPS_URL, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'getAdminData', accessToken }),
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+  });
+  const data = await r.json();
+  if (data.error) return alert(data.error);
+  const s = data.stats;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat">📅 السنة: ${s.year}</div>
+    <div class="stat">✅ مؤهلون: ${s.eligibleCount}</div>
+    <div class="stat">📝 مسجلون: ${s.registeredCount}</div>
+    <div class="stat"><a href="${s.photosFolderUrl}" target="_blank">📁 صور ${s.year}</a></div>
+    <div class="stat"><a href="${s.sheetUrl}" target="_blank">📊 Master Sheet</a></div>
+  `;
+  document.getElementById('archiveLink').href = s.archiveFolderUrl;
+}
+
+function confirmNewYear() {
+  const ok = confirm('⚠️ تحذير هام:\n\nسيتم أرشفة كل الملفات الحالية.\n\n❗ يجب عليك تنزيل الأرشيف على جهازك قبل بدء السنة القادمة لتجنب امتلاء Google Drive.\n\nهل أنت متأكد؟');
+  if (!ok) return;
+  startNewYear();
+}
+
+async function startNewYear() {
+  const m = document.getElementById('newYearMsg');
+  m.className = ''; m.textContent = 'جارٍ الأرشفة...';
+  try {
+    const r = await fetch(APPS_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'startNewYear', accessToken }),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+
+    m.className = 'ok';
+    m.innerHTML = `✅ ${data.message}<br><br>📂 <a href="${data.inboxUrl}" target="_blank"><b>افتح مجلد Inbox الآن</b></a> وارفع ملف الإكسيل الجديد.`;
+    window.open(data.inboxUrl, '_blank');
+
+    document.getElementById('processSection').style.display = 'block';
+    loadStats();
+  } catch (err) {
+    m.className = 'err';
+    m.textContent = '❌ ' + err.message;
+  }
+}
+
+async function processExcel() {
+  const m = document.getElementById('processMsg');
+  m.className = ''; m.textContent = 'جارٍ المعالجة...';
+  try {
+    const r = await fetch(APPS_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'processNewExcel', accessToken }),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    m.className = 'ok';
+    m.innerHTML = `✅ تم استيراد ${data.imported} طالب. المنظومة جاهزة لسنة ${data.year}.`;
+    loadStats();
+  } catch (err) {
+    m.className = 'err';
+    m.textContent = '❌ ' + err.message;
+  }
+}
+</script>
+</body>
+</html><!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <title>لوحة المالك</title>
+  <style>
+    body{font-family:Tahoma;background:#f0f2f5;padding:20px;max-width:800px;margin:auto}
+    .card{background:#fff;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+    button{background:#0a7c42;color:#fff;padding:12px 24px;border:none;border-radius:6px;cursor:pointer;font-size:15px;margin:6px}
+    button.danger{background:#b00}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .warn{background:#fff3cd;border-left:4px solid #f0ad4e;padding:12px;border-radius:6px;margin:12px 0}
+    .ok{background:#d4edda;padding:12px;border-radius:6px;margin:12px 0}
+    .err{background:#f8d7da;padding:12px;border-radius:6px;margin:12px 0}
+    .stat{display:inline-block;background:#e9ecef;padding:8px 14px;border-radius:20px;margin:4px}
+    a{color:#0a7c42}
+  </style>
+</head>
+<body>
+<div id="login" class="card">
+  <h2>🔐 لوحة المالك</h2>
+  <p>سجّل الدخول بحساب Google الخاص بالمالك فقط.</p>
+  <button onclick="login()">تسجيل الدخول بـ Google</button>
+  <div id="loginMsg"></div>
+</div>
+
+<div id="panel" class="card" style="display:none">
+  <h2>📊 لوحة التحكم</h2>
+  <div id="stats"></div>
+  <div class="warn">
+    ⚠️ <b>تذكير مهم:</b> يجب عليك تنزيل الأرشيف على جهازك سنويًا قبل بدء سنة جديدة، لتجنب امتلاء مساحة Google Drive. <a id="archiveLink" target="_blank">افتح مجلد الأرشيف</a>
+  </div>
+  <hr>
+  <h3>1️⃣ بدء سنة جديدة</h3>
+  <p>سيتم أرشفة كل الملفات الحالية (الشيت، الصور، البيانات) وإنشاء مجلد Inbox لرفع ملف الإكسيل الجديد.</p>
+  <button class="danger" onclick="confirmNewYear()">🚀 بدء سنة جديدة</button>
+  <div id="newYearMsg"></div>
+
+  <div id="processSection" style="display:none">
+    <hr>
+    <h3>2️⃣ معالجة ملف الإكسيل الجديد</h3>
+    <p>بعد رفع الملف في مجلد Inbox، اضغط الزر لاستيراده وبدء دورة الحياة الجديدة.</p>
+    <button onclick="processExcel()">📥 معالجة الملف واستيراد البيانات</button>
+    <div id="processMsg"></div>
+  </div>
+</div>
+
+<script>
+// ✏️ عدّل السطور الثلاثة دي من مفكرتك:
+const SUPABASE_URL = 'هنا_تحط_رابط_SUPABASE_URL';
+const SUPABASE_ANON = 'هنا_تحط_مفتاح_SUPABASE_ANON_KEY';
+const APPS_URL = 'هنا_تحط_رابط_WEB_APP_URL';
+
+let accessToken = null;
+
+(async () => {
+  const hash = new URLSearchParams(location.hash.substring(1));
+  if (hash.get('access_token')) {
+    accessToken = hash.get('access_token');
+    localStorage.setItem('sb_token', accessToken);
+    history.replaceState(null, '', location.pathname);
+  } else {
+    accessToken = localStorage.getItem('sb_token');
+  }
+  if (accessToken) {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { Authorization: 'Bearer ' + accessToken } });
+      if (r.ok) { showPanel(); loadStats(); } else { localStorage.removeItem('sb_token'); }
+    } catch {}
+  }
+})();
+
+function login() {
+  const redirect = location.origin + location.pathname;
+  location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirect)}`;
+}
+
+async function showPanel() {
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('panel').style.display = 'block';
+}
+
+async function loadStats() {
+  const r = await fetch(APPS_URL, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'getAdminData', accessToken }),
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+  });
+  const data = await r.json();
+  if (data.error) return alert(data.error);
+  const s = data.stats;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat">📅 السنة: ${s.year}</div>
+    <div class="stat">✅ مؤهلون: ${s.eligibleCount}</div>
+    <div class="stat">📝 مسجلون: ${s.registeredCount}</div>
+    <div class="stat"><a href="${s.photosFolderUrl}" target="_blank">📁 صور ${s.year}</a></div>
+    <div class="stat"><a href="${s.sheetUrl}" target="_blank">📊 Master Sheet</a></div>
+  `;
+  document.getElementById('archiveLink').href = s.archiveFolderUrl;
+}
+
+function confirmNewYear() {
+  const ok = confirm('⚠️ تحذير هام:\n\nسيتم أرشفة كل الملفات الحالية.\n\n❗ يجب عليك تنزيل الأرشيف على جهازك قبل بدء السنة القادمة لتجنب امتلاء Google Drive.\n\nهل أنت متأكد؟');
+  if (!ok) return;
+  startNewYear();
+}
+
+async function startNewYear() {
+  const m = document.getElementById('newYearMsg');
+  m.className = ''; m.textContent = 'جارٍ الأرشفة...';
+  try {
+    const r = await fetch(APPS_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'startNewYear', accessToken }),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+
+    m.className = 'ok';
+    m.innerHTML = `✅ ${data.message}<br><br>📂 <a href="${data.inboxUrl}" target="_blank"><b>افتح مجلد Inbox الآن</b></a> وارفع ملف الإكسيل الجديد.`;
+    window.open(data.inboxUrl, '_blank');
+
+    document.getElementById('processSection').style.display = 'block';
+    loadStats();
+  } catch (err) {
+    m.className = 'err';
+    m.textContent = '❌ ' + err.message;
+  }
+}
+
+async function processExcel() {
+  const m = document.getElementById('processMsg');
+  m.className = ''; m.textContent = 'جارٍ المعالجة...';
+  try {
+    const r = await fetch(APPS_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'processNewExcel', accessToken }),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    m.className = 'ok';
+    m.innerHTML = `✅ تم استيراد ${data.imported} طالب. المنظومة جاهزة لسنة ${data.year}.`;
+    loadStats();
+  } catch (err) {
+    m.className = 'err';
+    m.textContent = '❌ ' + err.message;
+  }
+}
+</script>
+</body>
+</html><!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <title>لوحة المالك</title>
+  <style>
+    body{font-family:Tahoma;background:#f0f2f5;padding:20px;max-width:800px;margin:auto}
+    .card{background:#fff;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+    button{background:#0a7c42;color:#fff;padding:12px 24px;border:none;border-radius:6px;cursor:pointer;font-size:15px;margin:6px}
+    button.danger{background:#b00}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .warn{background:#fff3cd;border-left:4px solid #f0ad4e;padding:12px;border-radius:6px;margin:12px 0}
+    .ok{background:#d4edda;padding:12px;border-radius:6px;margin:12px 0}
+    .err{background:#f8d7da;padding:12px;border-radius:6px;margin:12px 0}
+    .stat{display:inline-block;background:#e9ecef;padding:8px 14px;border-radius:20px;margin:4px}
+    a{color:#0a7c42}
+  </style>
+</head>
+<body>
+<div id="login" class="card">
+  <h2>🔐 لوحة المالك</h2>
+  <p>سجّل الدخول بحساب Google الخاص بالمالك فقط.</p>
+  <button onclick="login()">تسجيل الدخول بـ Google</button>
+  <div id="loginMsg"></div>
+</div>
+
+<div id="panel" class="card" style="display:none">
+  <h2>📊 لوحة التحكم</h2>
+  <div id="stats"></div>
+  <div class="warn">
+    ⚠️ <b>تذكير مهم:</b> يجب عليك تنزيل الأرشيف على جهازك سنويًا قبل بدء سنة جديدة، لتجنب امتلاء مساحة Google Drive. <a id="archiveLink" target="_blank">افتح مجلد الأرشيف</a>
+  </div>
+  <hr>
+  <h3>1️⃣ بدء سنة جديدة</h3>
+  <p>سيتم أرشفة كل الملفات الحالية (الشيت، الصور، البيانات) وإنشاء مجلد Inbox لرفع ملف الإكسيل الجديد.</p>
+  <button class="danger" onclick="confirmNewYear()">🚀 بدء سنة جديدة</button>
+  <div id="newYearMsg"></div>
+
+  <div id="processSection" style="display:none">
+    <hr>
+    <h3>2️⃣ معالجة ملف الإكسيل الجديد</h3>
+    <p>بعد رفع الملف في مجلد Inbox، اضغط الزر لاستيراده وبدء دورة الحياة الجديدة.</p>
+    <button onclick="processExcel()">📥 معالجة الملف واستيراد البيانات</button>
+    <div id="processMsg"></div>
+  </div>
+</div>
+
+<script>
+// ✏️ عدّل السطور الثلاثة دي من مفكرتك:
+const SUPABASE_URL = 'هنا_تحط_رابط_SUPABASE_URL';
+const SUPABASE_ANON = 'هنا_تحط_مفتاح_SUPABASE_ANON_KEY';
+const APPS_URL = 'هنا_تحط_رابط_WEB_APP_URL';
+
+let accessToken = null;
+
+(async () => {
+  const hash = new URLSearchParams(location.hash.substring(1));
+  if (hash.get('access_token')) {
+    accessToken = hash.get('access_token');
+    localStorage.setItem('sb_token', accessToken);
+    history.replaceState(null, '', location.pathname);
+  } else {
+    accessToken = localStorage.getItem('sb_token');
+  }
+  if (accessToken) {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { Authorization: 'Bearer ' + accessToken } });
+      if (r.ok) { showPanel(); loadStats(); } else { localStorage.removeItem('sb_token'); }
+    } catch {}
+  }
+})();
+
+function login() {
+  const redirect = location.origin + location.pathname;
+  location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirect)}`;
+}
+
+async function showPanel() {
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('panel').style.display = 'block';
+}
+
+async function loadStats() {
+  const r = await fetch(APPS_URL, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'getAdminData', accessToken }),
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+  });
+  const data = await r.json();
+  if (data.error) return alert(data.error);
+  const s = data.stats;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat">📅 السنة: ${s.year}</div>
+    <div class="stat">✅ مؤهلون: ${s.eligibleCount}</div>
+    <div class="stat">📝 مسجلون: ${s.registeredCount}</div>
+    <div class="stat"><a href="${s.photosFolderUrl}" target="_blank">📁 صور ${s.year}</a></div>
+    <div class="stat"><a href="${s.sheetUrl}" target="_blank">📊 Master Sheet</a></div>
+  `;
+  document.getElementById('archiveLink').href = s.archiveFolderUrl;
+}
+
+function confirmNewYear() {
+  const ok = confirm('⚠️ تحذير هام:\n\nسيتم أرشفة كل الملفات الحالية.\n\n❗ يجب عليك تنزيل الأرشيف على جهازك قبل بدء السنة القادمة لتجنب امتلاء Google Drive.\n\nهل أنت متأكد؟');
+  if (!ok) return;
+  startNewYear();
+}
+
+async function startNewYear() {
+  const m = document.getElementById('newYearMsg');
+  m.className = ''; m.textContent = 'جارٍ الأرشفة...';
+  try {
+    const r = await fetch(APPS_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'startNewYear', accessToken }),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+
+    m.className = 'ok';
+    m.innerHTML = `✅ ${data.message}<br><br>📂 <a href="${data.inboxUrl}" target="_blank"><b>افتح مجلد Inbox الآن</b></a> وارفع ملف الإكسيل الجديد.`;
+    window.open(data.inboxUrl, '_blank');
+
+    document.getElementById('processSection').style.display = 'block';
+    loadStats();
+  } catch (err) {
+    m.className = 'err';
+    m.textContent = '❌ ' + err.message;
+  }
+}
+
+async function processExcel() {
+  const m = document.getElementById('processMsg');
+  m.className = ''; m.textContent = 'جارٍ المعالجة...';
+  try {
+    const r = await fetch(APPS_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'processNewExcel', accessToken }),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    m.className = 'ok';
+    m.innerHTML = `✅ تم استيراد ${data.imported} طالب. المنظومة جاهزة لسنة ${data.year}.`;
+    loadStats();
+  } catch (err) {
+    m.className = 'err';
+    m.textContent = '❌ ' + err.message;
+  }
+}
+</script>
+</body>
+</html><!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <title>لوحة المالك</title>
+  <style>
+    body{font-family:Tahoma;background:#f0f2f5;padding:20px;max-width:800px;margin:auto}
+    .card{background:#fff;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+    button{background:#0a7c42;color:#fff;padding:12px 24px;border:none;border-radius:6px;cursor:pointer;font-size:15px;margin:6px}
+    button.danger{background:#b00}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .warn{background:#fff3cd;border-left:4px solid #f0ad4e;padding:12px;border-radius:6px;margin:12px 0}
+    .ok{background:#d4edda;padding:12px;border-radius:6px;margin:12px 0}
+    .err{background:#f8d7da;padding:12px;border-radius:6px;margin:12px 0}
+    .stat{display:inline-block;background:#e9ecef;padding:8px 14px;border-radius:20px;margin:4px}
+    a{color:#0a7c42}
+  </style>
+</head>
+<body>
+<div id="login" class="card">
+  <h2>🔐 لوحة المالك</h2>
+  <p>سجّل الدخول بحساب Google الخاص بالمالك فقط.</p>
+  <button onclick="login()">تسجيل الدخول بـ Google</button>
+  <div id="loginMsg"></div>
+</div>
+
+<div id="panel" class="card" style="display:none">
+  <h2>📊 لوحة التحكم</h2>
+  <div id="stats"></div>
+  <div class="warn">
+    ⚠️ <b>تذكير مهم:</b> يجب عليك تنزيل الأرشيف على جهازك سنويًا قبل بدء سنة جديدة، لتجنب امتلاء مساحة Google Drive. <a id="archiveLink" target="_blank">افتح مجلد الأرشيف</a>
+  </div>
+  <hr>
+  <h3>1️⃣ بدء سنة جديدة</h3>
+  <p>سيتم أرشفة كل الملفات الحالية (الشيت، الصور، البيانات) وإنشاء مجلد Inbox لرفع ملف الإكسيل الجديد.</p>
+  <button class="danger" onclick="confirmNewYear()">🚀 بدء سنة جديدة</button>
+  <div id="newYearMsg"></div>
+
+  <div id="processSection" style="display:none">
+    <hr>
+    <h3>2️⃣ معالجة ملف الإكسيل الجديد</h3>
+    <p>بعد رفع الملف في مجلد Inbox، اضغط الزر لاستيراده وبدء دورة الحياة الجديدة.</p>
+    <button onclick="processExcel()">📥 معالجة الملف واستيراد البيانات</button>
+    <div id="processMsg"></div>
+  </div>
+</div>
+
+<script>
+// ✏️ عدّل السطور الثلاثة دي من مفكرتك:
+const SUPABASE_URL = 'هنا_تحط_رابط_SUPABASE_URL';
+const SUPABASE_ANON = 'هنا_تحط_مفتاح_SUPABASE_ANON_KEY';
+const APPS_URL = 'هنا_تحط_رابط_WEB_APP_URL';
+
+let accessToken = null;
+
+(async () => {
+  const hash = new URLSearchParams(location.hash.substring(1));
+  if (hash.get('access_token')) {
+    accessToken = hash.get('access_token');
+    localStorage.setItem('sb_token', accessToken);
+    history.replaceState(null, '', location.pathname);
+  } else {
+    accessToken = localStorage.getItem('sb_token');
+  }
+  if (accessToken) {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { Authorization: 'Bearer ' + accessToken } });
+      if (r.ok) { showPanel(); loadStats(); } else { localStorage.removeItem('sb_token'); }
+    } catch {}
+  }
+})();
+
+function login() {
+  const redirect = location.origin + location.pathname;
+  location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirect)}`;
+}
+
+async function showPanel() {
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('panel').style.display = 'block';
+}
+
+async function loadStats() {
+  const r = await fetch(APPS_URL, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'getAdminData', accessToken }),
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+  });
+  const data = await r.json();
+  if (data.error) return alert(data.error);
+  const s = data.stats;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat">📅 السنة: ${s.year}</div>
+    <div class="stat">✅ مؤهلون: ${s.eligibleCount}</div>
+    <div class="stat">📝 مسجلون: ${s.registeredCount}</div>
+    <div class="stat"><a href="${s.photosFolderUrl}" target="_blank">📁 صور ${s.year}</a></div>
+    <div class="stat"><a href="${s.sheetUrl}" target="_blank">📊 Master Sheet</a></div>
+  `;
+  document.getElementById('archiveLink').href = s.archiveFolderUrl;
+}
+
+function confirmNewYear() {
+  const ok = confirm('⚠️ تحذير هام:\n\nسيتم أرشفة كل الملفات الحالية.\n\n❗ يجب عليك تنزيل الأرشيف على جهازك قبل بدء السنة القادمة لتجنب امتلاء Google Drive.\n\nهل أنت متأكد؟');
+  if (!ok) return;
+  startNewYear();
+}
+
+async function startNewYear() {
+  const m = document.getElementById('newYearMsg');
+  m.className = ''; m.textContent = 'جارٍ الأرشفة...';
+  try {
+    const r = await fetch(APPS_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'startNewYear', accessToken }),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+
+    m.className = 'ok';
+    m.innerHTML = `✅ ${data.message}<br><br>📂 <a href="${data.inboxUrl}" target="_blank"><b>افتح مجلد Inbox الآن</b></a> وارفع ملف الإكسيل الجديد.`;
+    window.open(data.inboxUrl, '_blank');
+
+    document.getElementById('processSection').style.display = 'block';
+    loadStats();
+  } catch (err) {
+    m.className = 'err';
+    m.textContent = '❌ ' + err.message;
+  }
+}
+
+async function processExcel() {
+  const m = document.getElementById('processMsg');
+  m.className = ''; m.textContent = 'جارٍ المعالجة...';
+  try {
+    const r = await fetch(APPS_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'processNewExcel', accessToken }),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    m.className = 'ok';
+    m.innerHTML = `✅ تم استيراد ${data.imported} طالب. المنظومة جاهزة لسنة ${data.year}.`;
+    loadStats();
+  } catch (err) {
+    m.className = 'err';
+    m.textContent = '❌ ' + err.message;
+  }
+}
+</script>
+</body>
+</html>
